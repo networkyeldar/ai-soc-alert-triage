@@ -1,0 +1,876 @@
+{
+  "name": "isv_internal_autosoc",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=http://qdrant.example.local:6333/collections/fp_alerts_demo/points?wait=true",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ points: [{ id: $json.id, vector: $json.vector, payload: $json.payload }] }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        736,
+        -240
+      ],
+      "id": "6504f099-a9bf-4d5e-804a-25e164a2864d",
+      "name": "Add to RAG1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Функция генерации уникального ID для Qdrant\nfunction generateUUID() {\n  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {\n    const r = Math.random() * 16 | 0;\n    const v = c === 'x' ? r : (r & 0x3 | 0x8);\n    return v.toString(16);\n  });\n}\n\nreturn $input.all().map((item, index) => {\n  // Обращаемся к ноде, которая достает данные из базы IRIS\n  const originalAlert = $('To get last false positive').all()[index].json;\n\n  return {\n    json: {\n      id: generateUUID(),\n      \n      // Вектор берем из текущего элемента (ответ от ноды Embeddings1 / Gemini)\n    vector:$input.first().json.data[0].embedding, \n      \n      // Формируем метаданные (Payload), которые сохранятся в базе вместе с вектором\n      payload: {\n        alert_id: originalAlert.alert_id,\n        title: originalAlert.alert_title || \"Без названия\",\n        justification: originalAlert.justification || \"Обоснование не указано\",\n        full_log: originalAlert.full_log || \"\",\n        \n        // КРИТИЧЕСКИ ВАЖНО для правильной работы маршрутизации новых алертов:\n        status: 'false_positive' \n      }\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        -240
+      ],
+      "id": "54e73a7f-dc67-4f2e-80c0-a62d4eb828f9",
+      "name": "Parsing before RAG1"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "seconds",
+              "secondsInterval": 60
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -512,
+        -240
+      ],
+      "id": "8c604e71-61b5-4282-8a40-e1e1cd34a27f",
+      "name": "Schedule Trigger1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\n\n// Сбрасываем старый lastId\nstaticData.lastId = undefined;\n\n// Загружаем список уже обработанных ID\nlet processedIds = staticData.processedIds || [];\n\nconst newItems = [];\n\nfor (const item of $input.all()) {\n  const currentId = item.json.alert_id;\n\n  if (!processedIds.includes(currentId)) {\n    newItems.push(item);\n    processedIds.push(currentId);\n  }\n}\n\n// Сохраняем обновлённый список\nstaticData.processedIds = processedIds;\n\nif (newItems.length === 0) {\n  return [];\n}\n\nreturn newItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        -240
+      ],
+      "id": "6153729e-7d93-401d-9dc2-a9869e8e6474",
+      "name": "To get last false positive"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "autosoc-alert-ingest",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -512,
+        -16
+      ],
+      "id": "a5061148-329d-40bf-8d34-df76d77035e8",
+      "name": "Webhook",
+      "webhookId": "REPLACE_WITH_N8N_WEBHOOK_ID"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d36ffd11-d97a-483e-ac98-abc14b6d757a",
+              "leftValue": "={{ $json.result && $json.result.length > 0 && $json.result.some(match => match.payload.status == 'false_positive') }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1312,
+        208
+      ],
+      "id": "ace8e65d-fb3d-4bb4-89b6-6b65249de736",
+      "name": "If2"
+    },
+    {
+      "parameters": {
+        "curlImport": "",
+        "httpVariantWarning": "",
+        "method": "POST",
+        "url": "https://iris.example.local/alerts/add?cid=DEMO_CUSTOMER_ID",
+        "": "",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "dfirIrisApi",
+        "provideSslCertificates": false,
+        "sendQuery": false,
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer REPLACE_WITH_IRIS_API_TOKEN"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "alert_title",
+              "value": "=SOC Alert : {{ $('Parsing alerts from RabbitMQ').item.json.body.rule.description }}"
+            },
+            {
+              "name": "alert_status_id",
+              "value": "2"
+            },
+            {
+              "name": "alert_severity_id",
+              "value": "={{\n(() => {\n  const level = Number(\n    $('Parsing alerts from RabbitMQ').item.json.body?.rule?.level || 0\n  );\n\n  if (level >= 14) return 6; // Critical\n  if (level >= 12) return 5; // High\n  if (level >= 10) return 1; // Medium\n  if (level >= 7)  return 4; // Low\n  return 3;                  // Informational\n})()\n}}"
+            },
+            {
+              "name": "alert_customer_id",
+              "value": "DEMO_CUSTOMER_ID"
+            },
+            {
+              "name": "alert_source",
+              "value": "={{ $json.body?.agent?.name || $('Parsing alerts from RabbitMQ').item.json.body.agent.name||  $('Parsing alerts from RabbitMQ').item.json.body.data.win.system.computer  }}"
+            },
+            {
+              "name": "alert_description",
+              "value": "=### 🧠 AI Анализ (Вероятность TP: {{ $json.true_positive_score }}%)\n\n**Резюме:**\n{{ $json.analysis_summary }}\n\n**Найденные IoCs:**\n{{ $json.extracted_iocs.join(', ') }}\n\n---\n### 🛡️ Рекомендации по реагированию:\n{{ $json.response_playbook }}\n\n---\n**Сырой лог:** {{ $('Parsing alerts from RabbitMQ').item.json.body.full_log }}"
+            }
+          ]
+        },
+        "options": {
+          "allowUnauthorizedCerts": true
+        },
+        "infoMessage": ""
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2576,
+        304
+      ],
+      "id": "685905a3-f9db-4c83-a4ac-aee79448716a",
+      "name": "DFIR-IRIS HTTP Request",
+      "extendsCredential": "dfirIrisApi",
+      "credentials": {
+        "dfirIrisApi": {
+          "id": "REPLACE_IN_N8N",
+          "name": "DFIR-IRIS account ISV"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "237a20c3-ad8b-42de-abf8-fb49fe701ad5",
+              "leftValue": "={{ $json.true_positive_score }}",
+              "rightValue": 90,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2176,
+        224
+      ],
+      "id": "f6f4f568-c63a-42e7-8d52-16cbbf03296f",
+      "name": "If3"
+    },
+    {
+      "parameters": {
+        "queue": "isv_alert_processing_queue",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rabbitmq",
+      "typeVersion": 1.1,
+      "position": [
+        -288,
+        -16
+      ],
+      "id": "d429bfd5-9ba3-41a6-b490-f58a2b3e818f",
+      "name": "RabbitMQ",
+      "credentials": {
+        "rabbitmq": {
+          "id": "REPLACE_IN_N8N",
+          "name": "RabbitMQ account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "queue": "isv_alert_processing_queue",
+        "options": {
+          "autoDelete": false,
+          "acknowledge": "executionFinishesSuccessfully",
+          "parallelMessages": 1
+        }
+      },
+      "type": "n8n-nodes-base.rabbitmqTrigger",
+      "typeVersion": 1,
+      "position": [
+        -512,
+        224
+      ],
+      "id": "7c198629-0f77-427b-a0e7-51acc4db4775",
+      "name": "RabbitMQ Trigger",
+      "credentials": {
+        "rabbitmq": {
+          "id": "REPLACE_IN_N8N",
+          "name": "RabbitMQ account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const inputData = $input.item.json;\n\n// 1. Если данные пришли из RabbitMQ (обычно лежат в виде строки в поле content)\nif (inputData.content && typeof inputData.content === 'string') {\n    return JSON.parse(inputData.content);\n}\n\n// 2. Если данные пришли из Webhook при тестировании (уже распарсены n8n)\nreturn inputData;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -272,
+        224
+      ],
+      "id": "58aa7489-079f-43bf-99eb-34dcaabbff6d",
+      "name": "Parsing alerts from RabbitMQ"
+    },
+    {
+      "parameters": {
+        "jsCode": "let responseText = $input.first().json.text; // Changed .output to .text\n\n// Удаляем возможные маркеры markdown\nresponseText = responseText.replace(/```json/g, \"\").replace(/```/g, \"\").trim();\n\nreturn JSON.parse(responseText);"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        224
+      ],
+      "id": "78416f92-4775-4781-a02a-b3a146966829",
+      "name": "Parse AI results"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://qdrant.example.local:6333/collections/fp_alerts_demo/points/search",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  JSON.stringify({\n    \"vector\": $json.data[0].embedding,\n    \"limit\": 5,\n    \"score_threshold\": 0.85,\n    \"with_payload\": true\n  })\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1072,
+        208
+      ],
+      "id": "90f9872a-0250-47cf-aa0a-69c81c1cf22b",
+      "name": "Search in RAG Qrdant"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Ты — старший аналитик SOC (Security Operations Center) уровня L3 и эксперт по DFIR. \nТвоя задача — провести быстрый, точный и структурированный triage алертов от SIEM Wazuh.\nKnown trusted infrastructure must be supplied through environment-specific context; no production IPs are embedded in this public workflow.\nИНСТРУКЦИИ:\n1. Проанализируй предоставленный лог. Ищи реальные индикаторы компрометации (IoC), аномалии или признаки легитимного системного действия/False Positive.\n2. Определи вероятность реальной угрозы (true_positive_score) и ложного срабатывания (false_positive_score). Это должны быть целые числа от 0 до 100, в сумме дающие ровно 100.\n3. Будь КРАТКИМ. В поле analysis_summary напиши суть в 2-4 предложениях.\n4. Если true_positive_score > 90, напиши пошаговый playbook для реагирования. Если <= 90, напиши строго: \"Реагирование не требуется\".\n5. Извлекай только реальные IoC (IP, хэши, домены). Если их нет, верни пустой массив [].\n6. Язык ответа: Русский.\n\nКРИТИЧЕСКОЕ ТРЕБОВАНИЕ К ФОРМАТУ:\nТы ДОЛЖЕН ответить ТОЛЬКО валидным JSON-объектом. Запрещено использовать markdown (включая ```json), запрещены любые комментарии до или после JSON.\n\nОЖИДАЕМАЯ СТРУКТУРА JSON:\n{\n  \"analysis_summary\": \"Краткий вывод о событии (максимум 4 предложения).\",\n  \"extracted_iocs\": [\"ip\", \"hash\"],\n  \"true_positive_score\": 0,\n  \"false_positive_score\": 100,\n  \"response_playbook\": \"Реагирование не требуется\"\n}\n\nВХОДНЫЕ ДАННЫЕ ДЛЯ АНАЛИЗА:\n<rule_description>\n{{ $('Parsing alerts from RabbitMQ').item.json.body.rule.description }}\n</rule_description>\n\n<rule_level>\n{{ $('Parsing alerts from RabbitMQ').item.json.body.rule.level }}\n</rule_level>\n\n<full_log>\n{{ $('Parsing alerts from RabbitMQ').item.json.body.full_log.substring(0, 2000) }}\n{{ $('Parsing alerts from RabbitMQ').item.json.body.data.win.system.message }}\n</full_log>",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        1568,
+        224
+      ],
+      "id": "1707dd6b-1252-44f5-821f-82e8a6857eb0",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://llm.example.local:8030/v1/embeddings",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer REPLACE_WITH_EMBEDDING_API_TOKEN"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  JSON.stringify({\n    \"model\": \"Qwen/Qwen3-Embedding-4B\",\n    \"input\": \"Alert Description: \" + $json.alert_title + \" , Full Log: \" + $json.full_log\n  })\n}}",
+        "options": {
+          "timeout": 100000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        272,
+        -240
+      ],
+      "id": "0f61dfa7-07d0-45ab-b229-b7753ad3f0e0",
+      "name": "Embeddings Qwen2"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://llm.example.local:8030/v1/embeddings",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer REPLACE_WITH_EMBEDDING_API_TOKEN"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  JSON.stringify({\n    \"model\": \"Qwen/Qwen3-Embedding-4B\",\n    \"input\": \"Alert Description: \" + $json.alert_title + \" , Full Log: \" + $json.full_log\n  })\n}}",
+        "options": {
+          "timeout": 100000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        208
+      ],
+      "id": "264095e6-831c-4294-b4d7-8097ff912381",
+      "name": "Embeddings Qwen3"
+    },
+    {
+      "parameters": {
+        "chatId": "REPLACE_WITH_TELEGRAM_CHAT_ID",
+        "text": "=🚨 <b>Результат анализа алерта</b>\n\n📝 <b>Резюме:</b>\n{{ $json.analysis_summary }}\n\n🎯 <b>Оценка вероятности:</b>\n🟢 True Positive: {{ $json.true_positive_score }}\n🔴 False Positive: {{ $json.false_positive_score }}\n\n🛡 <b>Рекомендации (Playbook):</b>\n{{ $json.response_playbook }}\n\n🔗 <b>Извлеченные IoC:</b>\n{{ Array.isArray($json.extracted_iocs) && $json.extracted_iocs.length > 0 ? $json.extracted_iocs.join('\\n• ') : '<i>Отсутствуют</i>' }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2560,
+        80
+      ],
+      "id": "4124c2b4-a78f-4fbd-bb81-befd5e5a27bd",
+      "name": "Send a text message1",
+      "webhookId": "REPLACE_WITH_N8N_WEBHOOK_ID",
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_IN_N8N",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n    a.alert_id,\n    a.alert_title,\n    a.alert_note AS justification, \n    a.alert_description AS full_log,             \n    ars.resolution_status_name\nFROM \n    alerts a\nJOIN \n    alert_resolution_status ars ON a.alert_resolution_status_id = ars.resolution_status_id\nWHERE \n    ars.resolution_status_name = 'False Positive'\n    AND a.alert_customer_id = DEMO_CUSTOMER_ID;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -256,
+        -240
+      ],
+      "id": "6ce60bdc-e046-48e9-929f-1973353d9ba1",
+      "name": "Request to IRIS DB",
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_IN_N8N",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "value": "=={{ $json.raw_string_to_hash }}",
+        "dataPropertyName": "alert_hash"
+      },
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [
+        96,
+        224
+      ],
+      "id": "d336ddc2-f44e-44c4-9e26-e63f12bff748",
+      "name": "Crypto"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "key": "=soc:alerts:{{ $json.client_id }}:{{ $json.alert_hash }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        304,
+        224
+      ],
+      "id": "9f327016-0b7c-40cd-a277-dd90b6609dd2",
+      "name": "Redis",
+      "credentials": {
+        "redis": {
+          "id": "REPLACE_IN_N8N",
+          "name": "Redis account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "42730b7b-5654-401a-95c0-851e78adee64",
+              "leftValue": "={{ $json.propertyName }}",
+              "rightValue": "null",
+              "operator": {
+                "type": "boolean",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        496,
+        224
+      ],
+      "id": "b1f7e090-01f2-4202-bb60-ca943679195b",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "jsCode": "for (const item of $input.all()) {\n  const alert = item.json;\n  \n  const clientId = alert.tenant_name || 'isv';\n\n  // 1. Делаем глубокую копию\n  const alertDataForHash = JSON.parse(JSON.stringify(alert.body));\n\n  // 2. Удаляем ВСЕ поля, которые делают лог уникальным по времени\n  delete alertDataForHash.timestamp;\n  delete alertDataForHash.id; // Обязательно удаляем уникальный ID алерта\n  \n  // Безопасное удаление вложенных полей\n  if (alertDataForHash.predecoder) {\n    delete alertDataForHash.predecoder.timestamp;\n  }\n\n  // Поле full_log тоже содержит время в самом начале строки. \n  // Лучше всего вообще исключить его из генерации хэша, \n  // так как распарсенных полей (rule, agent, decoder и т.д.) более чем достаточно для уникальности.\n  delete alertDataForHash.full_log;\n\n  // 3. Превращаем очищенный лог в строку\n  const dataToHash = JSON.stringify(alertDataForHash);\n\n  item.json.raw_string_to_hash = dataToHash;\n  item.json.client_id = clientId;\n}\n\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        224
+      ],
+      "id": "1efb9e41-cd20-47a8-87dc-2ff3e44841d2",
+      "name": "raw_string_to_hash"
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "=soc:alerts:{{ $('Crypto').item.json.client_id }}:{{ $('Crypto').item.json.alert_hash }}",
+        "value": "1",
+        "expire": true,
+        "ttl": 40000
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        704,
+        16
+      ],
+      "id": "165716ad-1fd4-493c-a069-38cc5701ac11",
+      "name": "Redis1",
+      "credentials": {
+        "redis": {
+          "id": "REPLACE_IN_N8N",
+          "name": "Redis account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "**Воркфлоу 1.**\nДобавление false positive алертов  в RAG базу"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1040,
+        -256
+      ],
+      "id": "6000bf34-b0f5-4eca-a04d-eeffd111ea9d",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "**Воркфлоу 2.**\nДобавление алертов в очередь в RabbitMQ"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1040,
+        -16
+      ],
+      "id": "0d4e4035-01dc-478c-88d8-d418a4ba26f6",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "**Воркфлоу 3**.\n\n**AI-based Alert Processing**\n\n1. Получает одно событие (алерт) из очереди **RabbitMQ**.\n2. Выполняет парсинг алерта и извлекает необходимые поля.\n3. Вычисляет хэш алерта (без учета изменяющихся полей, например времени).\n4. Проверяет наличие хэша в **Redis**:\n\n   * если хэш уже существует — алерт считается дубликатом, выполнение воркфлоу прекращается;\n   * если хэш отсутствует — хэш сохраняется в Redis (с заданным TTL), после чего обработка продолжается.\n5. Преобразует текст алерта в векторное представление (embedding).\n6. Выполняет поиск по базе знаний **RAG**:\n\n   * если найдено совпадение, классифицированное как **False Positive**, выполнение воркфлоу прекращается;\n   * если совпадение не найдено или алерт не является False Positive, данные передаются ИИ-модели для анализа.\n7. Выполняет парсинг ответа ИИ и извлекает результаты анализа (классификацию, уровень уверенности, обоснование и рекомендации).\n8. Если вероятность **True Positive** превышает **90%**, автоматически:\n\n   * создается инцидент в **IRIS**;\n   * отправляется уведомление в **Telegram**.\n",
+        "height": 768,
+        "width": 464
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1040,
+        224
+      ],
+      "id": "72c6546b-7d5c-439e-80c4-5a1267aa58a3",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "curlImport": "",
+        "httpVariantWarning": "",
+        "method": "GET",
+        "url": "https://www.virustotal.com/api/v3/",
+        "": "",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "virusTotalApi",
+        "provideSslCertificates": false,
+        "sendQuery": false,
+        "sendHeaders": false,
+        "sendBody": false,
+        "options": {},
+        "infoMessage": ""
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1872,
+        -80
+      ],
+      "id": "e260a060-8aab-4e7a-bc1b-1cf3f12caae3",
+      "name": "VirusTotal HTTP Request",
+      "extendsCredential": "virusTotalApi"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "RedHatAI/gemma-4-26B-A4B-it-NVFP4",
+          "mode": "id"
+        },
+        "options": {
+          "maxTokens": 2048
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        1520,
+        464
+      ],
+      "id": "0539bab4-fa45-4808-b024-928db932fb8c",
+      "name": "GEMMA Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_IN_N8N",
+          "name": "Local LLM API"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Parsing before RAG1": {
+      "main": [
+        [
+          {
+            "node": "Add to RAG1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger1": {
+      "main": [
+        [
+          {
+            "node": "Request to IRIS DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "To get last false positive": {
+      "main": [
+        [
+          {
+            "node": "Embeddings Qwen2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "RabbitMQ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If2": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If3": {
+      "main": [
+        [
+          {
+            "node": "Send a text message1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "DFIR-IRIS HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "RabbitMQ Trigger": {
+      "main": [
+        [
+          {
+            "node": "Parsing alerts from RabbitMQ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsing alerts from RabbitMQ": {
+      "main": [
+        [
+          {
+            "node": "raw_string_to_hash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI results": {
+      "main": [
+        [
+          {
+            "node": "If3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search in RAG Qrdant": {
+      "main": [
+        [
+          {
+            "node": "If2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Parse AI results",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "VirusTotal HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings Qwen2": {
+      "main": [
+        [
+          {
+            "node": "Parsing before RAG1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings Qwen3": {
+      "main": [
+        [
+          {
+            "node": "Search in RAG Qrdant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request to IRIS DB": {
+      "main": [
+        [
+          {
+            "node": "To get last false positive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crypto": {
+      "main": [
+        [
+          {
+            "node": "Redis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Embeddings Qwen3",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Redis1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "raw_string_to_hash": {
+      "main": [
+        [
+          {
+            "node": "Crypto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GEMMA Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "nodeGroups": [],
+  "tags": []
+}

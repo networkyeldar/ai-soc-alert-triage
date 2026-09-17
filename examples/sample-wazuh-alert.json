@@ -1,0 +1,16 @@
+{
+  "tenant_name": "demo",
+  "body": {
+    "timestamp": "2026-01-01T12:00:00Z",
+    "rule": {
+      "id": "5710",
+      "level": 10,
+      "description": "Example authentication alert"
+    },
+    "agent": {
+      "id": "001",
+      "name": "demo-host"
+    },
+    "full_log": "Synthetic example only; no production telemetry."
+  }
+}

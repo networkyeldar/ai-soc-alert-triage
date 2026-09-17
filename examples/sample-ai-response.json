@@ -1,0 +1,9 @@
+{
+  "analysis_summary": "Synthetic example: repeated authentication failures require analyst validation.",
+  "extracted_iocs": [
+    "203.0.113.10"
+  ],
+  "true_positive_score": 92,
+  "false_positive_score": 8,
+  "response_playbook": "Validate the account and source, review authentication history, and isolate the affected endpoint if compromise is confirmed."
+}
